@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: umrah-store-crm
+    runtime: docker
+    plan: starter
+    healthCheckPath: /healthz
+    disk:
+      name: crm-data
+      mountPath: /data
+      sizeGB: 2
+    envVars:
+      - key: DATA_DIR
+        value: /data
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: PUBLIC_URL
+        sync: false   # e.g. https://crm.theumrahstore.com - used for canonical URLs and sitemap
+      - key: SERPAPI_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
