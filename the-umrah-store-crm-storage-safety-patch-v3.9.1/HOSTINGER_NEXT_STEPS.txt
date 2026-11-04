@@ -1,0 +1,25 @@
+THE UMRAH STORE CRM 3.9.1 — HOSTINGER STORAGE SETUP
+
+IMPORTANT: Complete the storage setup BEFORE deploying this version. The app is intentionally designed to stop rather than silently create a blank database when production storage is missing or inside the deployment folder.
+
+1. Hostinger File Manager → home folder (the same level where you can see hbuilds and public_html). Create a folder named: umrah-data
+
+2. Open hbuilds/current/nodejs/data. COPY (do not move) all of its contents into /home/u544159223/umrah-data. Include db.json and all folders such as receipts, brand, backups, promos, kyc and wa-auth. Keep the original data folder unchanged until verification is complete.
+
+3. Hostinger → Websites → portal.theumrahstore.com → Environment variables. Change DATA_DIR from ./data to exactly:
+   /home/u544159223/umrah-data
+
+4. Do NOT set ALLOW_EMPTY_DB=1. Do NOT set RESET_ADMIN=1. Leave both unset unless intentionally performing a first-time installation or admin password reset. Keep your existing ADMIN_PASSWORD setting unchanged if present.
+
+5. The storage layer now fails closed if the configured database is missing, invalid, or missing required v3 collections; it will not silently replace a missing/truncated database with empty collections.
+
+6. Deploy this code. In deployment/runtime logs, confirm the app prints:
+   Data folder: /home/u544159223/umrah-data
+
+7. Log in to the CRM and open this URL in the same browser:
+   https://portal.theumrahstore.com/api/backup/status
+   It should return ok:true and persistentOutsideApp:true, with databasePresent:true, initialized:true, and the data folders present.
+
+8. Keep Hostinger account backups enabled and download an off-server CRM backup regularly. Local backups protect against app redeploys; they are not a substitute for an independent backup.
+
+DATABASE NOTE: This application currently uses a JSON database file at DATA_DIR/db.json. It does not use MySQL. Hostinger showing “Database: None” is expected for this code. Do not create a separate MySQL database and assume the CRM will use it.
