@@ -1,0 +1,88 @@
+'use strict';
+/* Integration test: boots the real server on a throw-away data dir and probes permission boundaries.  Run: node scripts/rbac-test.js */
+const { spawn } = require('child_process'); const fs = require('fs'); const os = require('os'); const path = require('path');
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crm-')), PORT = 3900 + Math.floor(Math.random() * 90), B = 'http://127.0.0.1:' + PORT;
+let srv, pass = 0, failN = 0;
+const ok = (c, m) => { if (c) { pass++; console.log('  PASS', m); } else { failN++; console.log('  FAIL', m); } };
+const start = () => new Promise(r => { srv = spawn('node', ['server.js'], { env: { ...process.env, PORT, DATA_DIR: dir, ADMIN_PASSWORD: 'AdminPass#1' }, stdio: ['ignore', 'pipe', 'inherit'] }); srv.stdout.on('data', d => { if (/running/.test(d)) r(); }); });
+const stop = () => new Promise(r => { srv.on('exit', r); srv.kill('SIGTERM'); });
+class C { constructor() { this.c = ''; }
+  async req(m, u, b) { const r = await fetch(B + u, { method: m, headers: { 'content-type': 'application/json', cookie: this.c }, body: b ? JSON.stringify(b) : undefined }); const sc = r.headers.get('set-cookie'); if (sc) this.c = sc.split(';')[0]; let j = {}; try { j = await r.json(); } catch {} return { s: r.status, j }; }
+  login(l, p) { return this.req('POST', '/api/login', { login: l, password: p }); } rpc(op, p) { return this.req('POST', '/api/rpc', { op, ...p }); } get(u) { return this.req('GET', u); } }
+(async () => {
+  await start(); const A = new C();
+  console.log('Authentication');
+  ok((await new C().login('admin', 'wrong')).s === 401, 'invalid credentials rejected');
+  ok((await A.login('admin', 'AdminPass#1')).s === 200, 'existing admin login works (login "admin")');
+  const st0 = (await A.get('/api/state')).j; ok(st0.perms.length > 30 && st0.user.role === 'admin', 'admin has every permission');
+  /* seed data */
+  const ag = (await A.rpc('saveParty', { kind: 'agent', name: 'Test Agent', limit: 1e7 })).j.id, sup = (await A.rpc('saveParty', { kind: 'supplier', name: 'Test Supplier' })).j.id;
+  const bk = (await A.rpc('saveBooking', { partyId: ag, category: 'Custom', pax: [{ n: 'A B', pp: 'AB123456' }], services: [{ type: 'hotel', title: 'H', sell: 1000, cost: 700, supId: sup, qty: 1, from: '2030-01-01', to: '2030-01-05' }] })).j;
+  ok(!!bk.id, 'admin creates booking (existing functionality)');
+  const roles = st0.rbac ? st0.rbac.roles : (await A.get('/api/state')).j.rbac.roles, byName = n => roles.find(r => r.name === n).id;
+  /* staff */
+  const mk = async (login, roleName, extra) => { const r = await A.rpc('staffSave', { login, password: 'Staff#Pass1', name: login }); await A.rpc('staffSetAccess', { id: r.j.id, roleIds: roleName ? [byName(roleName)] : [], grants: extra || [], denies: [] }); const c = new C(); await c.login(login, 'Staff#Pass1'); return { id: r.j.id, c }; };
+  const acc = await mk('acc1', 'Accounts Executive'), ops = await mk('ops1', 'Operations Executive'), none = await mk('none1', null);
+  console.log('Permissions');
+  const so = (await ops.c.get('/api/state')).j, sa = (await acc.c.get('/api/state')).j;
+  ok(so.bookings.length === 1 && !so.bookings[0].services[0].cost && !so.bookings[0].services[0].supId, 'operations: sees bookings but no supplier/cost data');
+  ok(so.payments.length === 0 && so.entries.length === 0 && !so.users && !so.settings && !so.log, 'operations: no payments/ledger/users/settings/log in state');
+  ok(!so.parties.some(p => p.kind === 'supplier') && so.parties.every(p => p.bal === undefined), 'operations: no supplier list and no balances');
+  ok((await ops.c.get('/api/ledger/' + ag)).s === 403 && (await ops.c.get('/api/ledger/' + sup)).s === 403, 'operations: direct ledger API blocked');
+  ok((await acc.c.get('/api/ledger/' + ag)).s === 200 && (await acc.c.get('/api/ledger/' + sup)).s === 200, 'accounts: ledgers readable');
+  ok(sa.bookings.length === 1 && !sa.bookings[0].services[0].supId, 'accounts: no supplier identity on bookings (no bookings.costs)');
+  ok((await acc.c.rpc('saveBooking', { partyId: ag, category: 'Custom', pax: [{ n: 'X', pp: 'ZZ1' }], services: [{ type: 'visa', sell: 5 }] })).s === 403, 'accounts: cannot create booking');
+  ok((await ops.c.rpc('saveBooking', { id: bk.id, partyId: ag, category: 'Custom', pax: [{ n: 'A B', pp: 'AB123456' }], services: [{ id: so.bookings[0].services[0].id, type: 'hotel', title: 'H2', sell: 1000, cost: 1, supId: null, qty: 1 }] })).s === 200, 'operations: can edit booking');
+  const after = (await A.get('/api/state')).j.bookings[0].services[0]; ok(after.cost === 700 && after.supId == sup, 'ops edit could not wipe/overwrite supplier cost');
+  ok((await ops.c.rpc('delBooking', { id: bk.id })).s === 403, 'operations: cannot delete booking');
+  ok((await ops.c.rpc('setStatus', { id: bk.id, status: 'Confirmed' })).s === 403, 'operations executive: cannot approve');
+  ok((await ops.c.rpc('addPayment', { partyId: ag, amt: 100 })).s === 403, 'operations: cannot record payment');
+  ok((await ops.c.rpc('saveSettings', { company: { name: 'Hacked' } })).s === 403, 'operations: cannot change settings');
+  ok((await ops.c.rpc('saveSettings', { serpapiKey: 'x' })).s === 403, 'operations: cannot change integrations');
+  ok((await ops.c.get('/api/backup')).s === 403, 'operations: backup blocked');
+  ok((await ops.c.get('/api/audit')).s === 403, 'operations: audit log blocked');
+  ok((await ops.c.get('/api/search/flights?from=KHI&to=JED&date=2030-01-01')).s === 403, 'operations: flight search blocked');
+  ok((await acc.c.rpc('addPayment', { partyId: ag, amt: 500, method: 'Cash' })).s === 200, 'accounts: can record payment');
+  const pays = (await A.get('/api/state')).j.payments; ok(pays.length === 1 && pays[0].status === 'Pending', 'payment by non-approver stays Pending');
+  ok((await acc.c.rpc('approvePayment', { id: pays[0].id })).s === 403, 'accounts executive: cannot approve payments');
+  ok((await acc.c.rpc('addEntry', { partyId: ag, dr: 5 })).s === 403, 'accounts executive: cannot post journal entries');
+  ok((await acc.c.rpc('delPayment', { id: pays[0].id })).s === 403, 'accounts: cannot delete payment');
+  ok((await none.c.get('/api/state')).j.bookings.length === 0 && (await none.c.rpc('saveParty', { kind: 'customer', name: 'x' })).s === 403, 'no-permission staff: nothing granted by default');
+  ok((await none.c.rpc('nonsense', {})).s === 403 || (await none.c.rpc('nonsense', {})).s === 400, 'unknown ops rejected');
+  console.log('Dashboard UI retained; dashboard.view remains a staff page permission');
+  console.log('Privilege escalation / staff management');
+  ok((await ops.c.rpc('staffSetAccess', { id: acc.id, grants: ['payments.approve'] })).s === 403, 'staff without permissions.manage cannot change access');
+  const mgr = await mk('mgr1', null, ['staff.view', 'staff.edit', 'staff.create', 'permissions.manage', 'roles.manage', 'bookings.view']);
+  ok((await mgr.c.rpc('staffSetAccess', { id: mgr.id, grants: ['staff.delete'] })).s === 403, 'manager cannot edit own permissions');
+  ok((await mgr.c.rpc('staffSetAccess', { id: none.id, grants: ['payments.approve'] })).s === 403, 'manager cannot grant a permission they do not hold');
+  ok((await mgr.c.rpc('staffSetAccess', { id: none.id, grants: ['bookings.view'] })).s === 200, 'manager can grant a permission they hold to a lower-privileged user');
+  ok((await mgr.c.rpc('staffSetAccess', { id: none.id, grants: ['system.admin'] })).s === 403 && (await mgr.c.rpc('staffSetAccess', { id: none.id, grants: ['settings.security'] })).s === 403, 'admin-only permissions can never be delegated');
+  ok((await mgr.c.rpc('staffSetAccess', { id: acc.id, grants: [] })).s === 403, 'manager cannot edit a user holding more access than themselves');
+  ok((await mgr.c.rpc('staffSetStatus', { id: 'admin', status: 'inactive' })).s === 403, 'admin account cannot be deactivated by staff');
+  ok((await A.rpc('staffSetStatus', { id: 'admin', status: 'inactive' })).s === 403, 'admin account protected even from the staff tool');
+  const rs = await mgr.c.rpc('roleSave', { name: 'Evil', perms: ['payments.approve'] }); ok(rs.s === 403, 'manager cannot create a role with permissions they lack');
+  ok((await mgr.c.rpc('staffSave', { login: 'newbie', password: 'Newbie#123', name: 'N' })).s === 200, 'manager can create ordinary staff');
+  ok((await mgr.c.get('/api/state')).j.users.every(u => !u.pw), 'password hashes never sent to browser');
+  console.log('Revocation');
+  ok((await acc.c.get('/api/ledger/' + ag)).s === 200, 'accounts has ledger access');
+  await A.rpc('staffSetAccess', { id: acc.id, roleIds: [], grants: [], denies: [] });
+  ok((await acc.c.get('/api/ledger/' + ag)).s === 403, 'revoked permission takes effect on the next request (same session)');
+  await A.rpc('staffSetAccess', { id: acc.id, roleIds: [byName('Accounts Executive')], grants: [], denies: ['ledgers.supplier.view'] });
+  ok((await acc.c.get('/api/ledger/' + sup)).s === 403 && (await acc.c.get('/api/ledger/' + ag)).s === 200, 'direct deny overrides a role permission');
+  await A.rpc('staffSetStatus', { id: acc.id, status: 'suspended' });
+  ok((await acc.c.get('/api/state')).j.user === null, 'suspended staff session is revoked');
+  ok((await new C().login('acc1', 'Staff#Pass1')).s === 401, 'suspended staff cannot log in');
+  await A.rpc('staffSetStatus', { id: acc.id, status: 'active' }); ok((await new C().login('acc1', 'Staff#Pass1')).s === 200, 'reactivated staff can log in');
+  ok((await A.get('/api/state')).j.users.find(u => u.id === ops.id).lastLogin !== '', 'last login recorded');
+  console.log('Audit');
+  const au = (await A.get('/api/audit')).j; ok(au.total > 5 && au.rows.some(r => r.a === 'staff.access_changed'), 'audit log records access changes');
+  ok(!JSON.stringify(au).includes('Staff#Pass1') && !JSON.stringify(au).includes('"pw"'), 'no passwords in audit log');
+  ok((await A.get('/api/audit?action=staff.created')).j.rows.every(r => r.a === 'staff.created'), 'audit filters work');
+  console.log('Persistence'); const before = (await A.get('/api/state')).j.users.length;
+  await A.rpc('saveParty', { kind: 'customer', name: 'flush' }); await new Promise(r => setTimeout(r, 700)); await stop(); await start();
+  const A2 = new C(); ok((await A2.login('admin', 'AdminPass#1')).s === 200, 'admin password unchanged after restart');
+  const s2 = (await A2.get('/api/state')).j; ok(s2.users.length === before && s2.rbac.roles.length > 12, 'staff, roles and permissions persist across restart');
+  const o2 = new C(); await o2.login('ops1', 'Staff#Pass1'); ok((await o2.get('/api/state')).j.perms.includes('bookings.view'), 'staff permission persisted');
+  await stop(); fs.rmSync(dir, { recursive: true, force: true });
+  console.log('\n' + pass + ' passed, ' + failN + ' failed'); process.exit(failN ? 1 : 0);
+})().catch(e => { console.error(e); try { srv.kill(); } catch {} process.exit(1); });

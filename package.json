@@ -1,0 +1,22 @@
+{
+  "name": "umrah-store-crm",
+  "version": "3.8.0",
+  "description": "The Umrah Store - B2B/B2C travel CRM: bookings, vouchers, ledgers, payments, queries, live search",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node scripts/engine-check.js && node scripts/rbac-test.js && node scripts/bank-ai-test.js && node scripts/extras-test.js && node scripts/payfast-test.js && node scripts/ai-groups-test.js && node scripts/live-test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "compression": "^1.8.2",
+    "express": "^4.22.3",
+    "qrcode": "^1.5.4"
+  },
+  "optionalDependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14"
+  }
+}

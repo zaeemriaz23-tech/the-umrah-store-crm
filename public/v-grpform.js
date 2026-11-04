@@ -1,0 +1,22 @@
+/* Group packages: manual add / edit form (validated again on the server) */
+'use strict';
+let GF = null;
+const gfBlank = () => ({ id: '', air: 'SV', airline: 'Saudi Arabian Airlines', code: '', dep: '', ret: '', seats: 40, out: { fn: '', from: 'LHE', to: 'JED', dt: '', at: '', bag: 30 }, inb: { fn: '', from: 'JED', to: 'LHE', dt: '', at: '', bag: 30 }, pk: [gfPk()] });
+const gfPk = () => ({ id: '', mk: '', mkn: 5, mkd: '', md: '', mdn: 5, mdd: '', p: { sh: '', qd: '', tr: '', db: '' } });
+const gi = (k, v, label, type = 'text', extra = '') => fld(label, `<input data-gf="${k}" type="${type}" value="${esc(v == null ? '' : v)}" ${extra}>`);
+const gfLeg = (key, l, title) => `<div class="card cp" style="box-shadow:none;border:1px solid var(--line)"><b>${title}</b><div class="g2" style="margin-top:8px">${gi(key + '.fn', l.fn, 'Flight no.', 'text', 'placeholder="SV 739" maxlength="14"')}${gi(key + '.bag', l.bag, 'Baggage (kg)', 'number', 'min="0" max="60" inputmode="numeric"')}${gi(key + '.from', l.from, 'From (airport code)', 'text', 'maxlength="3" style="text-transform:uppercase"')}${gi(key + '.to', l.to, 'To (airport code)', 'text', 'maxlength="3" style="text-transform:uppercase"')}${gi(key + '.dt', l.dt, 'Departs', 'time')}${gi(key + '.at', l.at, 'Arrives', 'time')}</div></div>`;
+const gfPkHtml = (k, i) => `<div class="card cp" style="box-shadow:none;border:1px solid var(--line)"><div class="row sb"><b>Hotel package ${i + 1}</b>${GF.pk.length > 1 ? `<button class="btn sm ghost" data-act="gfDelPk" data-a="${i}" aria-label="Remove package">${ic('trash', 'sm')}</button>` : ''}</div><div class="g2" style="margin-top:8px">${gi(`pk.${i}.mk`, k.mk, 'Makkah hotel')}${gi(`pk.${i}.mkn`, k.mkn, 'Nights', 'number', 'min="0" max="60" inputmode="numeric"')}${gi(`pk.${i}.mkd`, k.mkd, 'Distance from Haram', 'text', 'placeholder="300 m"')}${gi(`pk.${i}.md`, k.md, 'Madinah hotel')}${gi(`pk.${i}.mdn`, k.mdn, 'Nights', 'number', 'min="0" max="60" inputmode="numeric"')}${gi(`pk.${i}.mdd`, k.mdd, 'Distance from Masjid an-Nabawi', 'text', 'placeholder="150 m"')}</div><div class="g2" style="margin-top:6px;grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">${[['sh', 'Sharing'], ['qd', 'Quad'], ['tr', 'Triple'], ['db', 'Double']].map(r => gi(`pk.${i}.p.${r[0]}`, k.p[r[0]], r[1] + ' (PKR)', 'number', 'min="0" inputmode="numeric"')).join('')}</div></div>`;
+function gfRead() {
+  $$('[data-gf]', $('#gform')).forEach(e => { const path = e.dataset.gf.split('.'); let o = GF; path.slice(0, -1).forEach(k => { o = o[k]; }); const last = path[path.length - 1]; o[last] = e.type === 'number' ? (e.value === '' ? '' : +e.value) : e.type === 'text' && /(\.from|\.to|^air)$/.test(e.dataset.gf) ? e.value.toUpperCase() : e.value; });
+}
+function gfDraw() {
+  const g = GF; $('#gform').innerHTML = `<div class="g1"><div class="g2">${gi('air', g.air, 'Airline code *', 'text', 'maxlength="3" style="text-transform:uppercase" placeholder="SV"')}${gi('airline', g.airline, 'Airline name')}${gi('code', g.code, 'Your group code (optional)')}${gi('seats', g.seats, 'Seats available *', 'number', 'min="0" max="999" inputmode="numeric"')}${gi('dep', g.dep, 'Departure date *', 'date')}${gi('ret', g.ret, 'Return date *', 'date')}</div>${gfLeg('out', g.out, 'Outbound flight')}${gfLeg('inb', g.inb, 'Return flight')}${g.pk.map(gfPkHtml).join('')}<button class="btn" data-act="gfAddPk" type="button">${ic('plus', 'sm')}Add another hotel package</button></div>`;
+}
+function gfOpen(g, title, id) {
+  GF = JSON.parse(JSON.stringify(g)); openModal({ title, wide: true, body: '<div id="gform"></div>', foot: `<button class="btn ghost" data-act="closeModal">Cancel</button><button class="btn pri" data-act="gfSave" data-a="${esc(id || '')}">${id ? 'Save changes' : 'Publish group'}</button>` }); gfDraw();
+}
+ACT.gAdd = () => gfOpen(gfBlank(), 'Add group package', '');
+ACT.gEdit = id => { const g = (S.groups || []).find(x => x.id === id); if (g) gfOpen(g, 'Edit ' + id, id); };
+ACT.gfAddPk = () => { gfRead(); GF.pk.push(gfPk()); gfDraw(); };
+ACT.gfDelPk = i => { gfRead(); GF.pk.splice(+i, 1); gfDraw(); };
+ACT.gfSave = async (id, b) => { gfRead(); const g = JSON.parse(JSON.stringify(GF)); g.pk.forEach(k => { Object.keys(k.p).forEach(r => { k.p[r] = +k.p[r] || 0; }); }); if (id) g.id = id; else delete g.id; try { await doRpc(b, 'saveGroup', { group: g }, id ? 'Group updated' : 'Group published', closeModal); } catch { /* toast shown */ } };
