@@ -1,0 +1,26 @@
+THE UMRAH STORE CRM 3.10.0 — HOSTINGER MYSQL SETUP
+
+IMPORTANT: Configure persistent file storage and MySQL environment variables BEFORE the new code is deployed/restarted.
+
+1. In Hostinger File Manager, open the existing app data folder (the previous working deployment used hbuilds/versions/01a1a7b1-4a2a-71a0-a92b-acf76032d437/nodejs/data). Create /home/u544159223/umrah-data at the same home level as hbuilds and public_html.
+2. COPY (do not move) the entire contents of the existing data folder into /home/u544159223/umrah-data. Include db.json, receipts, brand, backups, promos, kyc and wa-auth. Keep the original folder unchanged.
+3. Hostinger → Websites → portal.theumrahstore.com → Environment variables. Set:
+   DATA_DIR=/home/u544159223/umrah-data
+4. Add these MySQL variables. Hostinger's current Node.js connection guidance uses 127.0.0.1 (not localhost, which can resolve to IPv6 ::1) and port 3306:
+   DB_HOST=127.0.0.1
+   DB_PORT=3306
+   DB_NAME=u544159223_umrah_crm
+   DB_USER=<the full MySQL username shown by Hostinger>
+   DB_PASSWORD=<the password you set when creating the database>
+   DB_SSL=0
+   Do not share the password in chat.
+5. Leave ALLOW_EMPTY_DB and RESET_ADMIN unset. Do not delete the old app data folder.
+6. Deploy/restart the new commit. On the first successful connection, the app automatically creates two tables in phpMyAdmin:
+   - crm_state
+   - crm_state_backups
+   Existing validated db.json is imported into crm_state if the SQL table is empty. It is not deleted.
+7. In the startup logs, confirm it says the MySQL state was loaded/imported and lists the two tables. Open https://portal.theumrahstore.com/healthz and confirm storage=mysql.
+8. After verifying login and creating a test record, check that the record survives a restart. Keep Hostinger backups enabled and continue taking off-server CRM backups.
+
+DATABASE DESIGN NOTE
+To preserve the existing CRM modules safely, all CRM collections are serialized in the payload field of the crm_state row. crm_state_backups stores full revisioned snapshots. This is MySQL-backed persistent storage, but not a normalized per-entity SQL schema. Uploaded receipts and media remain in DATA_DIR.
