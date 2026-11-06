@@ -26,3 +26,8 @@ Upload the new ZIP and restart the app. Data in `DATA_DIR` is untouched. Back-up
 
 ## 5. Health check
 `https://your-domain.com/healthz` returns `{"ok":true,"version":"3.8.0"}`.
+
+
+## MySQL primary storage
+
+Set `DATA_DIR` to an absolute persistent folder outside the application's `hbuilds` deployment directories (for example `/home/USERNAME/umrah-data`). Configure `DB_HOST`, `DB_PORT=3306`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, and `DB_SSL=0` using Hostinger's environment-variable facility. Deploy with `npm install` (the project depends on `mysql2`). The first successful start creates `crm_state` and `crm_state_backups` automatically. If `crm_state` is empty, the app imports the valid `DATA_DIR/db.json` state. Later starts load MySQL as the source of truth. `/healthz` reports the active storage driver, connection status, and persisted revision. Do not manually create tables or delete `db.json`; the app manages the schema and keeps the local snapshot for recovery.

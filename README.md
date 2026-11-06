@@ -128,3 +128,10 @@ Known limits: no record-level restrictions (e.g. "only assigned agents") yet; ex
 * **Receipt uploads** are now verified by file signature (JPG, PNG, GIF, WebP, HEIC, PDF), not just the file extension.
 * **Rate limits**: flight/hotel search is capped per user per hour (protects SerpApi credits); airport autocomplete is capped per IP.
 * **CI**: GitHub Actions workflow (`.github/workflows/ci.yml`) runs `npm test` on every push and pull request.
+
+
+## MySQL primary storage (v3.12.1)
+
+When `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` are configured, the CRM uses MySQL as its authoritative persistence store. On first start it creates `crm_state` and `crm_state_backups`, imports the existing valid `DATA_DIR/db.json` state if the MySQL state row is empty, and thereafter saves the shared CRM state to MySQL while maintaining an atomic local JSON recovery snapshot. The application does not start in MySQL mode if credentials are incomplete, the connection fails, `DATA_DIR` is not an absolute folder outside the deployment, or the existing local JSON file is corrupt and there is no MySQL state row. Without DB variables, local JSON mode remains available for development and tests.
+
+Hostinger environment variables: `DB_HOST`, `DB_PORT` (normally `3306`), `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSL` (`0` or `1`), and an absolute persistent `DATA_DIR` outside `hbuilds`. Never commit `.env` or database credentials.

@@ -55,7 +55,13 @@ const limit = (key, max, ms) => { const t = (bucket.get(key) || []).filter(x => 
 setInterval(() => { for (const [k, v] of bucket) if (!v.some(x => Date.now() - x < 36e5)) bucket.delete(k); }, 6e5).unref();
 
 app.use((req, res, next) => { if (req.method === 'GET' && !req.path.startsWith('/api/')) R.rememberHost(SEO.baseUrl(req)); next(); });
-app.get('/healthz', (req, res) => res.json({ ok: true, version: require('./package.json').version }));
+app.get('/healthz', async (req, res) => {
+  try {
+    const storage = await D.health();
+    const storageOk = !storage.configured || storage.healthy;
+    res.status(storageOk ? 200 : 503).json({ ok: true, version: require('./package.json').version, storage });
+  } catch (e) { res.status(503).json({ ok: false, version: require('./package.json').version, storage: { driver: 'mysql', healthy: false, error: e.message } }); }
+});
 
 app.post('/api/login', (req, res) => {
   if (!limit('login:' + req.ip, Math.max(3, +db.settings.security.loginMax || 10), 9e5)) return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
@@ -330,14 +336,25 @@ app.use((req, res) => {
 });
 app.use((err, req, res, next) => { console.error(err); if (res.headersSent) return next(err); if (req.path.startsWith('/api/')) return res.status(500).json({ error: 'Something went wrong' }); res.status(500).send(R.infoPage('Something went wrong', 'Please try again in a moment.', false)); });
 
-AI.init(); X.init(); sweep(); setInterval(() => { sweep(); Chat.sweep(); const n = db.notifs.length; X.detect(); if (db.notifs.length !== n) D.save(); }, 60000).unref();
-setInterval(() => X.fxRefresh(false).catch(() => {}), 36e5).unref(); setTimeout(() => X.fxRefresh(false).catch(() => {}), 5000).unref();
-const server = app.listen(PORT, () => {
-  console.log('The Umrah Store CRM v' + require('./package.json').version + ' running on port ' + PORT);
-  console.log('Data folder: ' + DATA + (/node_modules|public_html|\/app\/?$/.test(DATA) ? '  (WARNING: keep DATA_DIR outside the deployed folder or a redeploy can erase it)' : ''));
-  if (!process.env.ADMIN_PASSWORD && check(D.DEFAULT_ADMIN_PASSWORD, (db.users.find(u => u.id === 'admin') || {}).pw)) console.warn('WARNING: the administrator still uses the default password. Set ADMIN_PASSWORD or change it after signing in.');
-  I.waAutoStart();
-});
-server.keepAliveTimeout = 65000; server.headersTimeout = 70000;
+let server = null;
+async function startServer() {
+  // Do not accept traffic until the selected storage backend is initialized.
+  await D.init();
+  AI.init(); X.init(); sweep();
+  setInterval(() => { sweep(); Chat.sweep(); const n = db.notifs.length; X.detect(); if (db.notifs.length !== n) D.save(); }, 60000).unref();
+  setInterval(() => X.fxRefresh(false).catch(() => {}), 36e5).unref();
+  setTimeout(() => X.fxRefresh(false).catch(() => {}), 5000).unref();
+  server = app.listen(PORT, () => {
+    console.log('The Umrah Store CRM v' + require('./package.json').version + ' running on port ' + PORT);
+    console.log('Data folder: ' + DATA + (/node_modules|public_html|\/app\/?$/.test(DATA) ? '  (WARNING: keep DATA_DIR outside the deployed folder or a redeploy can erase it)' : ''));
+    if (!process.env.ADMIN_PASSWORD && check(D.DEFAULT_ADMIN_PASSWORD, (db.users.find(u => u.id === 'admin') || {}).pw)) console.warn('WARNING: the administrator still uses the default password. Set ADMIN_PASSWORD or change it after signing in.');
+    I.waAutoStart();
+  });
+  server.keepAliveTimeout = 65000; server.headersTimeout = 70000;
+  return server;
+}
+startServer().catch(e => { console.error('FATAL STARTUP ERROR:', e && e.stack || e); process.exit(1); });
 process.on('unhandledRejection', e => console.error('Unhandled rejection:', e && e.stack || e));
-process.on('uncaughtException', e => { console.error('Uncaught exception:', e && e.stack || e); try { D.flush(); } catch { /* ignore */ } process.exit(1); });
+process.on('uncaughtException', e => { console.error('Uncaught exception:', e && e.stack || e); D.flushAsync().finally(() => process.exit(1)); });
+process.once('SIGTERM', () => { if (server) server.close(); D.flushAsync().finally(() => process.exit(0)); });
+process.once('SIGINT', () => { if (server) server.close(); D.flushAsync().finally(() => process.exit(0)); });
