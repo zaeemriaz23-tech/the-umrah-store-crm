@@ -161,3 +161,95 @@
     if (kind === 'calc') { calcInit(); calcBind(); calcRender(); } else if (kind === 'transport') { trInit(); trBind(); trRender(); }
   }).catch(() => { app.innerHTML = '<div class="em"><h2>Could not load</h2><p>Please refresh the page or contact us on WhatsApp.</p></div>'; });
 })();
+
+/* ===== v5: navigation, home tabs, hotels, login, tracking, flight request ===== */
+(function () {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const post = (u, b) => fetch(u, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json().catch(() => ({})).then(j => { if (!r.ok) { const e = new Error(j.error || 'Something went wrong'); e.data = j; throw e; } return j; }));
+  document.addEventListener('error', e => { if (e.target && e.target.tagName === 'IMG' && e.target.hasAttribute('data-rm')) e.target.remove(); }, true);
+  /* header + dropdowns + drawer */
+  const hd = $('#hd'); if (hd) addEventListener('scroll', () => hd.classList.toggle('sc', scrollY > 8), { passive: true });
+  const closeDD = () => $$('.dd.open').forEach(d => { d.classList.remove('open'); d.querySelector('button').setAttribute('aria-expanded', 'false'); });
+  document.addEventListener('click', e => { const b = e.target.closest('.dd > button'); if (b) { const d = b.parentNode, was = d.classList.contains('open'); closeDD(); if (!was) { d.classList.add('open'); b.setAttribute('aria-expanded', 'true'); } } else if (!e.target.closest('.dm')) closeDD(); });
+  const dr = $('#drawer'), bg = $('#burger'), setDr = o => { if (!dr) return; dr.classList.toggle('open', o); dr.setAttribute('aria-hidden', String(!o)); bg.setAttribute('aria-expanded', String(o)); document.body.style.overflow = o ? 'hidden' : ''; };
+  if (bg) bg.addEventListener('click', () => setDr(true)); if (dr) dr.addEventListener('click', e => { if (e.target.closest('[data-close]') || e.target.closest('a')) setDr(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDD(); setDr(false); } });
+  /* home search tabs */
+  $$('.sqt [data-tab]').forEach(b => b.addEventListener('click', () => { $$('.sqt [data-tab]').forEach(x => x.setAttribute('aria-selected', String(x === b))); $$('.sqp').forEach(p => { p.hidden = p.id !== 'sp-' + b.dataset.tab; }); }));
+  const qs = new URLSearchParams(location.search);
+  /* group filter prefill */
+  if ($('#fMon') && qs.get('m')) { $('#fMon').value = qs.get('m'); } if ($('#fAir') && qs.get('a')) { $('#fAir').value = qs.get('a'); } if ($('#gfilters') && (qs.get('m') || qs.get('a'))) $('#fMon').dispatchEvent(new Event('change'));
+  /* hotel filters */
+  const grid = $('#hgrid');
+  if (grid) {
+    const cards = $$('.hc', grid); let city = '';
+    const run = () => {
+      const q = ($('#hq').value || '').trim().toLowerCase(), st = +$('#hs').value || 0, so = $('#hsort').value; let n = 0;
+      cards.forEach(c => { const ok = (!city || c.dataset.city === city) && (!q || c.dataset.name.includes(q)) && (+c.dataset.stars >= st); c.hidden = !ok; if (ok) n++; });
+      const key = { price: c => +c.dataset.price || 1e9, dist: c => +c.dataset.dist || 1e9, stars: c => -c.dataset.stars }[so];
+      [...cards].sort((a, b) => key ? key(a) - key(b) : (+a.dataset.order - +b.dataset.order)).forEach(c => grid.appendChild(c));
+      $('#hcount').textContent = n + ' hotel' + (n === 1 ? '' : 's') + ' found'; $('#hnone').hidden = n > 0;
+    };
+    $$('#hfilters .seg button').forEach(b => b.addEventListener('click', () => { city = b.dataset.city; $$('#hfilters .seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b))); run(); }));
+    ['input', 'change'].forEach(ev => $('#hfilters').addEventListener(ev, e => { if (!e.target.closest('.seg')) run(); }));
+    if (qs.get('q')) $('#hq').value = qs.get('q'); if (qs.get('stars')) $('#hs').value = qs.get('stars');
+    if (qs.get('city')) { const b = $(`#hfilters .seg [data-city="${qs.get('city').replace(/[^A-Z]/g, '')}"]`); if (b) b.click(); } run();
+  }
+  /* hotel gallery */
+  const gal = $('[data-gal]');
+  if (gal) {
+    const th = $$('.th button', gal); let i = 0; const show = n => { if (!th.length) return; i = (n + th.length) % th.length; const m = $('#galmain'); m.src = th[i].dataset.full; m.alt = th[i].dataset.alt; $('#galct').textContent = (i + 1) + ' / ' + th.length; th.forEach((b, k) => b.toggleAttribute('aria-current', k === i)); };
+    gal.addEventListener('click', e => { const g = e.target.closest('[data-gp]'), t = e.target.closest('[data-gi]'); if (g) show(i + +g.dataset.gp); else if (t) show(+t.dataset.gi); });
+  }
+  /* generic lead form posts */
+  const sendLead = async (form, errEl, btn, payload, done) => {
+    errEl.textContent = ''; btn.disabled = true;
+    try { const j = await post('/api/public/lead', { ...payload, name: form.name.value, phone: form.phone.value, website: form.website.value }); done(j); } catch (er) { errEl.textContent = er.message; btn.disabled = false; }
+  };
+  const thanks = (form, j) => { form.innerHTML = '<h3>Thank you</h3><p class="ok">Your request ' + esc(j.no) + ' has been received.</p><p class="mut">Our team will contact you on WhatsApp / phone shortly.</p>'; };
+  const hb = $('#hbook');
+  if (hb) hb.addEventListener('submit', e => {
+    e.preventDefault(); const f = hb, er = $('#hberr');
+    if (!f.cin.value || !f.cout.value || f.cout.value <= f.cin.value) { er.textContent = 'Choose check-in and a later check-out date.'; return; }
+    const n = Math.round((Date.parse(f.cout.value) - Date.parse(f.cin.value)) / 864e5);
+    sendLead(f, er, $('#hbgo'), { kind: 'hotel', ref: f.dataset.hotel, message: f.message.value, summary: 'Hotel booking request: ' + f.dataset.hname + ' (' + f.dataset.city + ') · ' + f.room.value + ' · ' + f.cin.value + ' to ' + f.cout.value + ' (' + n + ' nights) · ' + f.adults.value + ' adults · ' + f.rooms.value + ' room(s)' }, j => thanks(f, j));
+  });
+  const fr = $('#flreq');
+  if (fr) {
+    const tog = () => { $('#retl').hidden = fr.trip.value === 'oneway'; }; fr.trip.addEventListener('change', tog); tog();
+    fr.addEventListener('submit', e => {
+      e.preventDefault(); const er = $('#flerr');
+      if (!fr.date.value) { er.textContent = 'Choose a departure date.'; return; } if (fr.trip.value === 'return' && fr.ret.value && fr.ret.value < fr.date.value) { er.textContent = 'Return date must be after departure.'; return; }
+      sendLead(fr, er, $('#flgo'), { kind: 'flight', summary: 'Flight fare request: ' + fr.from.value + ' to ' + fr.to.value + ' · ' + fr.date.value + (fr.trip.value === 'return' && fr.ret.value ? ' return ' + fr.ret.value : ' one way') + ' · ' + fr.ad.value + ' adult(s), ' + fr.ch.value + ' child(ren), ' + fr.inf.value + ' infant(s)' }, j => thanks(fr, j));
+    });
+  }
+  /* agent login */
+  const al = $('#agentlogin');
+  if (al) {
+    const er = $('#lgerr'), show = (m, k) => { er.textContent = m; er.className = 'al2 on ' + k; };
+    $('#lgeye').addEventListener('click', () => { const i = $('#lgp'); i.type = i.type === 'password' ? 'text' : 'password'; });
+    al.addEventListener('submit', async e => {
+      e.preventDefault(); er.className = 'al2'; if (!$('#lgu').value.trim() || !$('#lgp').value) return show('Enter your email/username and password.', 'bad');
+      const b = $('#lgbtn'); b.disabled = true;
+      try { await post('/api/login', { login: $('#lgu').value, password: $('#lgp').value }); const me = await fetch('/api/portal/me', { cache: 'no-store' }).then(r => r.json()); const nx = al.dataset.next; location.href = nx || (me.user && me.user.role === 'agent' ? '/agent-portal' : '/app'); }
+      catch (x) { show(x.message, x.data && x.data.pendingApproval ? 'warn' : 'bad'); b.disabled = false; }
+    });
+  }
+  const lo = $('#lgout'); if (lo) lo.addEventListener('click', async () => { await post('/api/logout', {}).catch(() => {}); location.reload(); });
+  /* booking tracking */
+  const tf = $('#trackf');
+  if (tf) {
+    const run = async e => {
+      e && e.preventDefault(); const er = $('#tkerr'), res = $('#tkres'); er.textContent = ''; res.innerHTML = ''; const b = $('#tkgo'); b.disabled = true;
+      try {
+        const { booking: k } = await post('/api/public/track', { no: tf.no.value, pp: tf.pp.value, website: tf.website.value });
+        const cls = k.status === 'Confirmed' ? 'ok' : k.status === 'Cancelled' ? 'can' : 'pen';
+        res.innerHTML = '<div class="box"><span class="pill ' + cls + '">' + esc(k.statusLabel) + '</span><h2 style="margin-top:10px">Booking ' + esc(k.no) + '</h2><p>' + esc(k.note) + '</p><dl class="kv" style="margin-top:10px">' + (k.from ? '<dt>Travel dates</dt><dd>' + esc(k.from) + (k.to ? ' to ' + esc(k.to) : '') + '</dd>' : '') + '<dt>Type</dt><dd>' + esc(k.category) + '</dd><dt>Travellers</dt><dd>' + k.travellers.map(t => esc(t.name)).join(', ') + '</dd></dl>' + (k.voucher ? '<p style="margin-top:14px"><a class="b pri" href="' + esc(k.voucher) + '" target="_blank" rel="noopener">Open voucher</a></p>' : '') + '</div><div class="box"><h2>Services</h2><ul class="tl2">' + k.services.map(s => '<li><div><b>' + esc(s.type) + ': ' + esc(s.title) + '</b><small>' + esc(s.state) + (s.from ? ' · ' + esc(s.from) + (s.to ? ' to ' + esc(s.to) : '') : '') + '</small></div></li>').join('') + '</ul></div>';
+      } catch (x) { er.textContent = x.message; }
+      b.disabled = false;
+    };
+    tf.addEventListener('submit', run);
+  }
+})();

@@ -1,6 +1,6 @@
 /* Agent portal - dusk-airport theme. Blue actions, glass navigation, white search card. */
 :root{
-  --navy:#081540;--navy2:#0d2160;--blue:#0a63f5;--blue2:#0850cc;--blue-soft:#e8f0ff;--sky:#4f8dff;
+  --navy:#04251a;--navy2:#063d22;--blue:#0b5d2e;--blue2:#084a24;--blue-soft:#dcf2e5;--sky:#1fa355;
   --ink:#0f1729;--tx:#344054;--mute:#667085;--faint:#98a2b3;--line:#e4e7ec;--line2:#f0f2f5;--bg:#f3f6fc;--card:#fff;
   --red:#d92d20;--redb:#fef3f2;--green:#067647;--greenb:#ecfdf3;--amber:#b54708;--amberb:#fffaeb;
   --r:12px;--sh:0 24px 60px -18px rgba(5,14,56,.45);--font:'Plus Jakarta Sans','Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif}
@@ -18,7 +18,7 @@ svg.i.sm{width:15px;height:15px}svg.i.lg{width:24px;height:24px}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ---------- scene (hero backdrop) ---------- */
-.scene{position:absolute;inset:0 0 auto 0;height:900px;z-index:0;overflow:hidden;background:linear-gradient(180deg,#071238 0%,#0f2466 28%,#3a3a8f 52%,#b3578a 72%,#f2a064 90%,#f8c08a 100%)}
+.scene{position:absolute;inset:0 0 auto 0;height:900px;z-index:0;overflow:hidden;background:linear-gradient(180deg,#03200f 0%,#0a4a24 45%,#1b7a45 78%,#d9b44a 100%)}
 .scene.short{height:430px}
 .scene svg{position:absolute;right:-4%;bottom:0;height:100%;width:78%;min-width:760px}
 .scene::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(6,13,45,.82) 0%,rgba(6,13,45,.55) 38%,rgba(6,13,45,.08) 72%),linear-gradient(180deg,rgba(6,13,45,.35),transparent 30%);z-index:2}

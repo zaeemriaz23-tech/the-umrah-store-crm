@@ -84,7 +84,7 @@ const BRAND = () => `<a class="brand" href="#/"><span class="mark"><img src="/br
 const chatHref = () => (ME.company.whatsapp ? 'https://wa.me/' + String(ME.company.whatsapp).replace(/\D/g, '') : ME.company.email ? 'mailto:' + ME.company.email : '#contact');
 const inits = n => String(n || '?').split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 function navItems(mobile) {
-  const L = [['/umrah-group-packages', 'Packages', 'layers'], ['/umrah-offers', 'Offers', 'spark'], ['/umrah-hotels', 'Hotels', 'hotel'], ['/umrah-visa', 'Visa', 'visa'], ['/umrah-package-calculator', 'Calculator', 'calc'], ['/umrah-transport-booking', 'Transport', 'bus'], ['#contact', 'Contact', 'phone']];
+  const L = [['/', 'Home', 'globe'], ['/umrah-group-packages', 'Packages', 'layers'], ['/umrah-offers', 'Offers', 'spark'], ['/umrah-hotels', 'Hotels', 'hotel'], ['/umrah-visa', 'Visa', 'visa'], ['/umrah-package-calculator', 'Calculator', 'calc'], ['/umrah-transport-booking', 'Transport', 'bus'], ['#contact', 'Contact', 'phone']];
   return L.map(l => `<a class="l" href="${l[0]}" ${l[0] === '#contact' ? 'data-a="contact"' : ''}>${mobile ? ic(l[2]) : ''}${l[1]}</a>`).join('');
 }
 function renderNav() {

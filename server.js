@@ -333,9 +333,21 @@ app.post('/api/public/lead', (req, res) => {
   try { const r = Inv.publicLead(req.body || {}); save(); res.json({ ok: true, ...r }); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 let INDEX_RAW = null, PORTAL_RAW = null;
+const portalPage = (req, res) => { PORTAL_RAW = PORTAL_RAW || fs.readFileSync(path.join(PUB, 'portal.html'), 'utf8'); html(res, SEO.portalHtml(req, PORTAL_RAW), 0); };
 app.get(['/', '/index.html'], (req, res) => {
-  PORTAL_RAW = PORTAL_RAW || fs.readFileSync(path.join(PUB, 'portal.html'), 'utf8');
-  html(res, SEO.portalHtml(req, PORTAL_RAW), 0);
+  const q = req.query; if (q.from || q.to || q.login) return res.redirect(302, '/agent-portal' + req.url.replace(/^[^?]*/, ''));
+  html(res, SEO.homePage(req), 60);
+});
+app.get(['/agent-portal', '/agent-portal/'], portalPage);
+app.get('/agent-login', (req, res) => res.set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).send(SEO.agentLoginPage(req)));
+app.get('/track-booking', (req, res) => html(res, SEO.trackPage(req), 0));
+app.get('/umrah-hotels/:slug', (req, res) => { const h = SEO.hotelDetailPage(req, String(req.params.slug)); if (!h) return res.status(404).set({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }).send(SEO.notFoundPage(req)); html(res, h, 60); });
+app.get('/hotel-img/:f', (req, res) => { const f = path.basename(String(req.params.f)), full = path.join(Inv.HDIR, f); if (!/^[\w.-]+\.(jpg|png|webp)$/.test(f) || !FILE_OK(full)) return res.sendStatus(404); res.set('Cache-Control', 'public, max-age=2592000, immutable').sendFile(full); });
+app.post('/api/public/track', (req, res) => {
+  if (!limit('trk:' + req.ip, 12, 9e5)) return res.status(429).json({ error: 'Too many attempts. Please try again in 15 minutes or contact our team.' });
+  if (req.body.website) return res.status(404).json({ error: 'Not found' });
+  const no = String(req.body.no || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (no && !limit('trkno:' + no, 8, 36e5)) return res.status(429).json({ error: 'Too many attempts for this booking. Please contact our team.' });
+  try { res.set('Cache-Control', 'no-store').json({ ok: true, booking: require('./lib/track').lookup(req.body || {}) }); } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
 });
 app.get(['/app', '/app/'], (req, res) => {
   INDEX_RAW = INDEX_RAW || fs.readFileSync(path.join(PUB, 'index.html'), 'utf8');
