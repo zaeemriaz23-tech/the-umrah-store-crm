@@ -37,6 +37,10 @@ try {
   // That design was replaced (per-entity tables, transactional commits). The intent of those checks is kept below; the end-to-end
   // behaviour is verified against a REAL MySQL/MariaDB in scripts/mysql-integration-test.js.
   const Store = require(path.join(root, 'lib/store.js'));
+  const driverCfg = { enabled: true, host: '127.0.0.1', port: 3306, user: 'test', password: 'test', database: 'test', poolSize: 2 };
+  const driverPool = Store.createPool(driverCfg);
+  check(!!driverPool && typeof driverPool.query === 'function', 'MySQL driver resolves from the application path and creates a pool without connecting');
+  driverPool.end().catch(() => {});
   const ddl = fs.readFileSync(path.join(root, 'lib/store.js'), 'utf8');
   const tableNames = Store.ENTITIES.map(e => e.table);
   check(['crm_bookings', 'crm_parties', 'crm_payments', 'crm_ledger_entries', 'crm_expenses', 'crm_users', 'crm_vouchers', 'crm_groups', 'crm_hotels'].every(t => tableNames.includes(t)), 'startup schema covers bookings, agents/suppliers, payments, ledger, expenses, users, vouchers, groups, hotels');
