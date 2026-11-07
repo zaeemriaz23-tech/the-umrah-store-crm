@@ -1,6 +1,6 @@
 {
   "name": "umrah-store-crm",
-  "version": "3.12.1",
+  "version": "4.0.0",
   "description": "The Umrah Store - B2B/B2C travel CRM: bookings, vouchers, ledgers, payments, queries, live search",
   "private": true,
   "main": "server.js",

@@ -3,7 +3,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crm-')), PORT = 3700+Math.flo
 class C{constructor(){this.c=''} async req(m,u,b){const r=await fetch(B+u,{method:m,headers:{'content-type':'application/json',cookie:this.c},body:b?JSON.stringify(b):undefined});const sc=r.headers.get('set-cookie');if(sc)this.c=sc.split(';')[0];return{s:r.status,j:await r.json().catch(()=>({}))}} login(l,p){return this.req('POST','/api/login',{login:l,password:p})} rpc(o,p){return this.req('POST','/api/rpc',{op:o,...p})} get(u){return this.req('GET',u)}}
 let pass=0,fail=0;const ok=(c,m)=>{c?pass++:fail++;console.log(c?'PASS':'FAIL',m)};
 (async()=>{
- const srv=spawn('node',['server.js'],{env:{...process.env,PORT,DATA_DIR:dir,ADMIN_PASSWORD:'AdminPass#1'},stdio:['ignore','pipe','inherit']}); await new Promise(r=>srv.stdout.on('data',()=>r()));
+ const srv=spawn('node',['server.js'],{env:{...process.env,PORT,DATA_DIR:dir,ADMIN_PASSWORD:'AdminPass#1'},stdio:['ignore','pipe','inherit']}); await new Promise(r=>srv.stdout.on('data',d=>{if(/running/.test(d))r()}));
  const A=new C(); await A.login('admin','AdminPass#1');
  const ag=(await A.rpc('saveParty',{kind:'agent',name:'Ag One',limit:1e7})).j.id, sup=(await A.rpc('saveParty',{kind:'supplier',name:'Sup One'})).j.id;
  await A.rpc('saveUser',{}).catch(()=>{});

@@ -130,8 +130,16 @@ Known limits: no record-level restrictions (e.g. "only assigned agents") yet; ex
 * **CI**: GitHub Actions workflow (`.github/workflows/ci.yml`) runs `npm test` on every push and pull request.
 
 
-## MySQL primary storage (v3.12.1)
+## MySQL primary storage (v4.0.0)
 
-When `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` are configured, the CRM uses MySQL as its authoritative persistence store. On first start it creates `crm_state` and `crm_state_backups`, imports the existing valid `DATA_DIR/db.json` state if the MySQL state row is empty, and thereafter saves the shared CRM state to MySQL while maintaining an atomic local JSON recovery snapshot. The application does not start in MySQL mode if credentials are incomplete, the connection fails, `DATA_DIR` is not an absolute folder outside the deployment, or the existing local JSON file is corrupt and there is no MySQL state row. Without DB variables, local JSON mode remains available for development and tests.
+When `DB_HOST`, `DB_NAME`, `DB_USER` and `DB_PASSWORD` are set, **MySQL is the only source of truth**. Nothing is read from `db.json` once MySQL holds data, and if MySQL is configured but unreachable the app stays offline (`/healthz` = 503) instead of falling back to JSON.
 
-Hostinger environment variables: `DB_HOST`, `DB_PORT` (normally `3306`), `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSL` (`0` or `1`), and an absolute persistent `DATA_DIR` outside `hbuilds`. Never commit `.env` or database credentials.
+* **Tables** (created automatically, versioned in `crm_schema_migrations`): one per record type - `crm_parties` (agents, suppliers, customers), `crm_bookings`, `crm_payments`, `crm_ledger_entries`, `crm_expenses`, `crm_vouchers`, `crm_users`, `crm_groups`, `crm_hotels`, ... - plus `crm_sessions`, `crm_kv` (settings and counters), `crm_head` (last committed revision) and `crm_backups`. Each row has indexed columns for browsing in phpMyAdmin and the full record in `doc`.
+* **Commit before response**: every request that changes data is held until its transaction is committed. If MySQL cannot store it (after retries) the change is rolled back in memory and the client receives `503`, so a success response always means the data is in MySQL.
+* **First start**: if MySQL is empty, the existing `DATA_DIR/db.json` is imported once (a copy is kept in `DATA_DIR/backups/`). A populated database is never overwritten by a JSON file.
+* **Backups**: automatic gzip snapshots in `crm_backups` (default every 6 h, newest 30 kept) plus a recovery snapshot `DATA_DIR/db.json` of the last committed state.
+* **Tools**: `node scripts/db-tool.js status | backups | backup | restore <id> | verify`.
+* **Health**: `GET /healthz` returns the version and `storage` (driver, connected, committed revision, pending writes); it answers 503 whenever MySQL is down or a revision is uncommitted.
+* **Shutdown**: on SIGTERM/SIGINT the server stops accepting requests, commits pending writes, closes the pool and exits.
+
+See `HOSTINGER.md` for deployment. Run one application instance per database.

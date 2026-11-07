@@ -35,6 +35,26 @@ app.disable('x-powered-by');
 app.use(compression({ filter: (req, res) => !/\/stream$/.test(req.path) && compression.filter(req, res) }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
+const VERSION = require('./package.json').version;
+/* Health check: answers even while the database is down. Healthy only when MySQL answers AND the latest revision is committed. */
+app.get('/healthz', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    const storage = await D.health();
+    const healthy = !!storage.healthy;
+    res.status(healthy ? 200 : 503).json({ ok: healthy, status: healthy ? 'healthy' : 'unhealthy', version: VERSION, node: process.version, uptimeSeconds: Math.round(process.uptime()), storage });
+  } catch (e) { res.status(503).json({ ok: false, status: 'unhealthy', version: VERSION, storage: { driver: process.env.DB_HOST ? 'mysql' : 'json', healthy: false, error: e.message } }); }
+});
+/* Nothing else is served until the storage backend is initialised. */
+app.use((req, res, next) => {
+  if (D.isReady()) return next();
+  const st = D.status();
+  res.set({ 'Retry-After': '10', 'Cache-Control': 'no-store' });
+  if (/^\/api\//.test(req.path) || /json/.test(req.headers.accept || '')) return res.status(503).json({ error: 'The database is not available yet. Please try again shortly.', code: 'STORAGE_UNAVAILABLE' });
+  res.status(503).type('html').send('<!doctype html><meta charset="utf-8"><title>Starting</title><p style="font:16px system-ui;margin:3rem auto;max-width:34rem">The system is starting or the database is temporarily unavailable. Please refresh in a moment.' + (st.state === 'failed' ? '' : '') + '</p>');
+});
+/* Any response produced after save() is held until that revision is committed to the database (503 + rollback if it cannot be). */
+app.use(D.requestScope);
 app.use((req, res, next) => {
   res.set({ 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'SAMEORIGIN', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Permissions-Policy': 'camera=(), microphone=(), geolocation=()' });
   if (req.secure) res.set('Strict-Transport-Security', 'max-age=15552000');
@@ -55,13 +75,6 @@ const limit = (key, max, ms) => { const t = (bucket.get(key) || []).filter(x => 
 setInterval(() => { for (const [k, v] of bucket) if (!v.some(x => Date.now() - x < 36e5)) bucket.delete(k); }, 6e5).unref();
 
 app.use((req, res, next) => { if (req.method === 'GET' && !req.path.startsWith('/api/')) R.rememberHost(SEO.baseUrl(req)); next(); });
-app.get('/healthz', async (req, res) => {
-  try {
-    const storage = await D.health();
-    const storageOk = !storage.configured || storage.healthy;
-    res.status(storageOk ? 200 : 503).json({ ok: true, version: require('./package.json').version, storage });
-  } catch (e) { res.status(503).json({ ok: false, version: require('./package.json').version, storage: { driver: 'mysql', healthy: false, error: e.message } }); }
-});
 
 app.post('/api/login', (req, res) => {
   if (!limit('login:' + req.ip, Math.max(3, +db.settings.security.loginMax || 10), 9e5)) return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
@@ -177,6 +190,9 @@ app.get('/api/backup', auth, perm('data.backup'), (req, res) => {
   res.set({ 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="umrah-store-backup-' + today() + '.json"' });
   res.send(JSON.stringify({ ...db, sessions: {} }));
 });
+
+app.get('/api/db/backups', auth, perm('data.backup'), async (req, res) => { try { res.json({ items: await D.listBackups(), lastBackupAt: (await D.health()).lastBackupAt }); } catch (e) { res.status(503).json({ error: e.message }); } });
+app.post('/api/db/backups', auth, perm('data.backup'), async (req, res) => { try { PM.audit(req.u, 'export.db_backup', 'database', {}); res.json({ ok: true, ...(await D.backupNow('manual')) }); } catch (e) { res.status(503).json({ error: e.message }); } });
 
 app.get('/api/qr', auth, async (req, res) => { res.type('image/svg+xml').send(await QRCode.toString(String(req.query.text || '').slice(0, 400) || ' ', { type: 'svg', margin: 1 })); });
 
@@ -336,25 +352,39 @@ app.use((req, res) => {
 });
 app.use((err, req, res, next) => { console.error(err); if (res.headersSent) return next(err); if (req.path.startsWith('/api/')) return res.status(500).json({ error: 'Something went wrong' }); res.status(500).send(R.infoPage('Something went wrong', 'Please try again in a moment.', false)); });
 
-let server = null;
+let server = null, timers = [], shuttingDown = false;
+function goLive() {
+  AI.init(); X.init(); sweep(); D.save();
+  timers.push(setInterval(() => { sweep(); Chat.sweep(); const n = db.notifs.length; X.detect(); if (db.notifs.length !== n) D.save(); }, 60000));
+  timers.push(setInterval(() => X.fxRefresh(false).catch(() => {}), 36e5));
+  timers.push(setTimeout(() => X.fxRefresh(false).catch(() => {}), 5000));
+  timers.forEach(t => t.unref());
+  I.waAutoStart();
+}
 async function startServer() {
-  // Do not accept traffic until the selected storage backend is initialized.
-  await D.init();
-  AI.init(); X.init(); sweep();
-  setInterval(() => { sweep(); Chat.sweep(); const n = db.notifs.length; X.detect(); if (db.notifs.length !== n) D.save(); }, 60000).unref();
-  setInterval(() => X.fxRefresh(false).catch(() => {}), 36e5).unref();
-  setTimeout(() => X.fxRefresh(false).catch(() => {}), 5000).unref();
-  server = app.listen(PORT, () => {
-    console.log('The Umrah Store CRM v' + require('./package.json').version + ' running on port ' + PORT);
-    console.log('Data folder: ' + DATA + (/node_modules|public_html|\/app\/?$/.test(DATA) ? '  (WARNING: keep DATA_DIR outside the deployed folder or a redeploy can erase it)' : ''));
-    if (!process.env.ADMIN_PASSWORD && check(D.DEFAULT_ADMIN_PASSWORD, (db.users.find(u => u.id === 'admin') || {}).pw)) console.warn('WARNING: the administrator still uses the default password. Set ADMIN_PASSWORD or change it after signing in.');
-    I.waAutoStart();
-  });
+  /* Listen first so /healthz can explain a database problem; every other route answers 503 until storage is ready. */
+  server = app.listen(PORT, () => console.log('The Umrah Store CRM v' + VERSION + ' listening on port ' + PORT + ' (waiting for storage; /healthz is available)'));
   server.keepAliveTimeout = 65000; server.headersTimeout = 70000;
+  await D.initWithRetry();
+  await D.commit();
+  goLive();
+  console.log('The Umrah Store CRM v' + VERSION + ' running on port ' + PORT);
+  console.log('Data folder: ' + DATA + (/node_modules|public_html|\/app\/?$/.test(DATA) ? '  (WARNING: keep DATA_DIR outside the deployed folder or a redeploy can erase it)' : ''));
+  if (!process.env.ADMIN_PASSWORD && check(D.DEFAULT_ADMIN_PASSWORD, (db.users.find(u => u.id === 'admin') || {}).pw)) console.warn('WARNING: the administrator still uses the default password. Set ADMIN_PASSWORD or change it after signing in.');
   return server;
+}
+/* Safe shutdown: stop taking requests, let in-flight requests finish, commit pending revisions, close the pool, then exit. */
+async function shutdown(sig, code = 0) {
+  if (shuttingDown) return; shuttingDown = true;
+  console.log(sig + ' received: committing pending data before exit...');
+  const hard = setTimeout(() => { console.error('Shutdown timed out - forcing exit'); process.exit(code || 1); }, +(process.env.SHUTDOWN_TIMEOUT_MS || 20000)); hard.unref();
+  timers.forEach(t => { clearInterval(t); clearTimeout(t); });
+  try { if (server) await new Promise(r => { server.close(() => r()); if (server.closeIdleConnections) server.closeIdleConnections(); setTimeout(r, 8000).unref(); }); } catch { /* ignore */ }
+  try { await D.shutdown(); console.log('Pending data committed. Bye.'); } catch (e) { console.error('Shutdown commit failed:', e.message); code = code || 1; }
+  process.exit(code);
 }
 startServer().catch(e => { console.error('FATAL STARTUP ERROR:', e && e.stack || e); process.exit(1); });
 process.on('unhandledRejection', e => console.error('Unhandled rejection:', e && e.stack || e));
-process.on('uncaughtException', e => { console.error('Uncaught exception:', e && e.stack || e); D.flushAsync().finally(() => process.exit(1)); });
-process.once('SIGTERM', () => { if (server) server.close(); D.flushAsync().finally(() => process.exit(0)); });
-process.once('SIGINT', () => { if (server) server.close(); D.flushAsync().finally(() => process.exit(0)); });
+process.on('uncaughtException', e => { console.error('Uncaught exception:', e && e.stack || e); shutdown('uncaughtException', 1); });
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('SIGINT', () => shutdown('SIGINT'));

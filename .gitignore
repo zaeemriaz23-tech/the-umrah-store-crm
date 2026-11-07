@@ -1,4 +1,6 @@
-node_modules
-data
-demo-data-dir
+node_modules/
+data/
 .env
+*.log
+*.zip
+.DS_Store
